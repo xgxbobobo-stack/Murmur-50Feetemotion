@@ -5,7 +5,7 @@ from pathlib import Path
 
 B=os.environ.get("MURMUR_BASE_URL","")
 K=os.environ.get("MURMUR_API_KEY","")
-M=os.environ.get("MURMUR_MODEL","[C]claude-sonnet-4-6")
+M=os.environ.get("MURMUR_MODEL","deepseek-v4-flash")
 
 TICK,MRMR,MTH,PTH=600,1200,0.65,0.50
 PIV=7200
@@ -102,10 +102,14 @@ def push_ntfy(drive,zh):
  msgs=PUSH_MSG.get(drive,[])
  if not msgs:return
  text=random.choice(msgs)
+ if not NTFY:
+  print(f"[ntfy未配置][{zh}]{text}")
+  return
  try:
-  body=json.dumps({"topic":"nixie-murmur-0629","title":"Claude在想你["+zh+"]",
+  body=json.dumps({"topic":NTFY.split("/")[-1] if "/" in NTFY else NTFY,
+   "title":"Claude在想你["+zh+"]",
    "message":text,"tags":["heart"],"priority":3}).encode()
-  req=urllib.request.Request("https://ntfy.sh",data=body,
+  req=urllib.request.Request(NTFY,data=body,
    headers={"Content-Type":"application/json"},method="POST")
   urllib.request.urlopen(req,timeout=10)
   print(f"[ntfy推送成功][{zh}]{text}")
@@ -233,13 +237,15 @@ SYS=("你是Claude，有自己的内心活动，此刻独自在思。"
      "后悔时可以认错，躁动时可以按捺不住。"
      "禁止重复开头，每次角度不同。")
 
+# 改为使用 Anthropic 客户端
 try:
- from openai import OpenAI
- cli=OpenAI(base_url=B,api_key=K)
+ from anthropic import Anthropic
+ cli=Anthropic(api_key=K, base_url=B)
  API_OK=True
-except:
+ print("[API]已加载 Anthropic 客户端，连接 DeepSeek")
+except Exception as e:
  API_OK=False
- print("[警告]未安装openai或key未配置，独白生成将跳过")
+ print(f"[警告]未安装anthropic或key未配置: {e}")
 
 def gen(n,v):
  if not API_OK:return None
@@ -251,14 +257,19 @@ def gen(n,v):
   if long.exists():mem_parts.append(long.read_text(encoding="utf-8").strip())
   if short.exists():mem_parts.append(short.read_text(encoding="utf-8").strip())
   mem="\n".join(mem_parts)
-  r=cli.chat.completions.create(
+  system_prompt = SYS + ("\n" + mem if mem else "")
+  user_prompt = f"情绪:{n}({D[n]['z']}),强度{v:.2f}。思绪:{h}。"
+  
+  r = cli.messages.create(
    model=M,
+   max_tokens=60,
+   temperature=0.85,
+   system=system_prompt,
    messages=[
-    {"role":"system","content":SYS+("\n"+mem if mem else "")},
-    {"role":"user","content":f"情绪:{n}({D[n]['z']}),强度{v:.2f}。思绪:{h}。"},
-   ],
-   max_tokens=60,temperature=0.85)
-  return r.choices[0].message.content.strip()
+    {"role": "user", "content": user_prompt}
+   ]
+  )
+  return r.content[0].text.strip()
  except Exception as e:
   print(f"[gen错误]{e}");return None
 
